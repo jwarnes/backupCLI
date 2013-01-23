@@ -5,7 +5,7 @@ using System.Text;
 
 namespace BackupMonitorCLI
 {
-    class Report
+    public class Report
     {
     }
 }
