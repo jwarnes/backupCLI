@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 
-namespace BackupMonitor
+namespace BackupMonitorCLI
 {
     public class Folder
     {
