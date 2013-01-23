@@ -17,6 +17,11 @@ namespace BackupMonitorCLI
         public double Space { get; set; }
         public SpaceType spaceType { get; set; }
 
+        //CLE only fields
+        public bool UpdatedToday { get; set; }
+        public int LastUpdate { get; set; }
+        public bool LowOnSpace { get; set; }
+
         private List<Folder> folders;
 
         public List<Folder> Folders

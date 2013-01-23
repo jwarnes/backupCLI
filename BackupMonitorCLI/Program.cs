@@ -20,8 +20,7 @@ namespace BackupMonitorCLI
                 Environment.Exit(1);
             }
 
-            Monitor monitor = new Monitor();
-            monitor.Start();
+            new Monitor().Start();
 
 
             Console.ReadKey();

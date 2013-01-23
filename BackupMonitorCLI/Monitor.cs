@@ -25,9 +25,18 @@ namespace BackupMonitorCLI
             reports = new List<Report>();
             LoadConfiguration();
             ScanFolders();
+            CheckSpace();
+            CheckQueuedReports();
+            GenerateReports();
+            MailReports();
+            End();
         }
 
-        public void LoadConfiguration(string path = @"config.xml")
+        private void End()
+        {
+        }
+
+        private void LoadConfiguration(string path = @"config.xml")
         {
             Console.Write("Loading {0}...", path);
             XmlReaderSettings settings = new XmlReaderSettings();
@@ -68,12 +77,12 @@ namespace BackupMonitorCLI
 
         }
 
-        public void ScanFolders()
+        private void ScanFolders()
         {
             foreach (Server s in servers)
             {
                 bool updatedToday = false;
-                Console.WriteLine("Scanning folders for '{0}'...", s.Name);
+                Console.WriteLine("\nScanning folders for '{0}'...", s.Name);
                 foreach (Folder f in s.Folders)
                 {
                     Console.Write("\t{0}: ", f.Path);
@@ -86,20 +95,84 @@ namespace BackupMonitorCLI
                     var directory = new DirectoryInfo(f.Path);
                     var files = directory.GetFiles("*.tib", recurse).OrderByDescending(w => w.LastWriteTime);
 
-                    if(files.Any())
-                        Console.WriteLine("updated {0} days ago", (DateTime.Now - files.First().LastWriteTime).Days);
+                    if (files.Any())
+                    {
+                        s.LastUpdate = (DateTime.Now - files.First().LastWriteTime).Days;
+                        Console.WriteLine("updated {0} days ago", s.LastUpdate);
+                    }
                     else
+                    {
                         Console.WriteLine("no backups found");
+                        s.LastUpdate = -1;
+                    }
 
                     if (files.Any() && (DateTime.Now - files.First().LastWriteTime).Hours <= 24)
-                    {
-                        updatedToday = true;
-                    }
-                   
+                        s.UpdatedToday = true;
                 }
                 
             }
         }
 
+        private void CheckSpace()
+        {
+            foreach (Server s in servers)
+            {
+                Console.WriteLine("\nChecking space for '{0}'...", s.Name);
+                s.LowOnSpace = false;
+                foreach (Folder f in s.Folders)
+                {
+                    //var rootPath = ;
+                    var drive = new DriveInfo(Path.GetPathRoot(f.Path));
+                    var freeSpace = (double)drive.AvailableFreeSpace/1073741824;
+
+                    double spaceWarning = s.Space;
+
+                    //determine acceptible space remaining levels
+                    switch (s.spaceType)
+                    {
+                          case SpaceType.TB:
+                            spaceWarning *= 1024;
+                            break;
+                          case SpaceType.MB:
+                            spaceWarning /= 1024;
+                            break;
+                          case SpaceType.Percent:
+                            spaceWarning = ((double)drive.TotalSize/1073741824)*(s.Space/100);
+                            break;
+                    }
+
+                    Console.WriteLine("\t {0} {1}gb available", drive.Name, Math.Round(freeSpace, 1));
+                    if (freeSpace < spaceWarning)
+                    {
+                        Console.WriteLine("\t\tWARNING: Low space threshhold of {0}gb exceeded", Math.Round(spaceWarning, 1));
+                        s.LowOnSpace = true;
+                    }
+                }
+            }
+        }
+
+        private void CheckQueuedReports()
+        {
+        }
+
+        private void GenerateReports()
+        {
+
+        }
+
+        private void MailReports()
+        {
+
+        }
+
+        private void SaveReports()
+        {
+            
+        }
+
+        private void LoadReports()
+        {
+            
+        }
     }
 }
