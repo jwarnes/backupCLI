@@ -4,6 +4,9 @@ using System.Linq;
 using System.Text;
 using System.Xml;
 using System.IO;
+using System.Threading;
+using System.Net;
+using System.Net.Mail;
 
 namespace BackupMonitorCLI
 {
@@ -157,11 +160,30 @@ namespace BackupMonitorCLI
 
         private void GenerateReports()
         {
-
+            foreach (var s in servers)
+            {
+                reports.Add(new Report(s));
+            }
         }
 
         private void MailReports()
         {
+            var fromAddress = new MailAddress("backupmonitorreport@gmail.com", "Backup Report");
+            var toAddress = new MailAddress("JWarnes@samaritan.org", "Justin Warnes");
+            var password = "testPassword1";
+
+            var smtp = new SmtpClient
+                {
+                    Host = "smtp.gmail.com",
+                    Port = 465,
+                    EnableSsl = true,
+                    DeliveryMethod = SmtpDeliveryMethod.Network,
+                    UseDefaultCredentials = false,
+                    Credentials = new NetworkCredential(fromAddress.Address, password)
+                };
+
+            //todo http://stackoverflow.com/questions/32260/sending-email-in-net-through-gmail
+
 
         }
 
