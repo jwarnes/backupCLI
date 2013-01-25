@@ -19,8 +19,11 @@ namespace BackupMonitorCLI
 
         //CLE only fields
         public bool UpdatedToday { get; set; }
-        public int LastUpdate { get; set; }
         public bool LowOnSpace { get; set; }
+        public bool NoUpdates { get; set; }
+        public double FreeSpace { get; set; }
+        public double TotalSpace { get; set; }
+        public DateTime LastUpdate { get; set; }
 
         private List<Folder> folders;
 

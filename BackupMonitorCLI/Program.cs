@@ -10,9 +10,7 @@ namespace BackupMonitorCLI
     {
         static void Main(string[] args)
         {
-            Console.WriteLine("================");
-            Console.WriteLine(" Backup Monitor");
-            Console.WriteLine("================\n");
+            Console.Title = "Backup Monitor";
             
             if (!File.Exists(@"config.xml"))
             {

@@ -84,7 +84,9 @@ namespace BackupMonitorCLI
         {
             foreach (Server s in servers)
             {
-                bool updatedToday = false;
+                s.UpdatedToday = false;
+                s.NoUpdates = true;
+
                 Console.WriteLine("\nScanning folders for '{0}'...", s.Name);
                 foreach (Folder f in s.Folders)
                 {
@@ -96,18 +98,23 @@ namespace BackupMonitorCLI
                                                : SearchOption.TopDirectoryOnly;
 
                     var directory = new DirectoryInfo(f.Path);
+
+                    //returns a List<FileInfo> of *.tib files sorted by creation date
                     var files = directory.GetFiles("*.tib", recurse).OrderByDescending(w => w.LastWriteTime);
 
                     if (files.Any())
                     {
-                        s.LastUpdate = (DateTime.Now - files.First().LastWriteTime).Days;
-                        Console.WriteLine("updated {0} days ago", s.LastUpdate);
+                        if (files.First().LastWriteTime > s.LastUpdate)
+                            s.LastUpdate = files.First().LastWriteTime;
+                        Console.WriteLine("updated {0} days ago", (DateTime.Now - files.First().LastWriteTime).Days);
+                        s.NoUpdates = false;
                     }
                     else
                     {
                         Console.WriteLine("no backups found");
-                        s.LastUpdate = -1;
                     }
+
+                    var temp = (DateTime.Now - s.LastUpdate).Hours;
 
                     if (files.Any() && (DateTime.Now - files.First().LastWriteTime).Hours <= 24)
                         s.UpdatedToday = true;
@@ -124,9 +131,9 @@ namespace BackupMonitorCLI
                 s.LowOnSpace = false;
                 foreach (Folder f in s.Folders)
                 {
-                    //var rootPath = ;
                     var drive = new DriveInfo(Path.GetPathRoot(f.Path));
-                    var freeSpace = (double)drive.AvailableFreeSpace/1073741824;
+                    s.FreeSpace = (double)drive.AvailableFreeSpace/1073741824;
+                    s.TotalSpace = (double) drive.TotalSize/1073741824;
 
                     double spaceWarning = s.Space;
 
@@ -140,12 +147,12 @@ namespace BackupMonitorCLI
                             spaceWarning /= 1024;
                             break;
                           case SpaceType.Percent:
-                            spaceWarning = ((double)drive.TotalSize/1073741824)*(s.Space/100);
+                            spaceWarning = (s.TotalSpace)*(s.Space/100);
                             break;
                     }
 
-                    Console.WriteLine("\t {0} {1}gb available", drive.Name, Math.Round(freeSpace, 1));
-                    if (freeSpace < spaceWarning)
+                    Console.WriteLine("\t {0} {1}gb available", drive.Name, Math.Round(s.FreeSpace, 1));
+                    if (s.FreeSpace < spaceWarning)
                     {
                         Console.WriteLine("\t\tWARNING: Low space threshhold of {0}gb exceeded", Math.Round(spaceWarning, 1));
                         s.LowOnSpace = true;
@@ -170,7 +177,7 @@ namespace BackupMonitorCLI
         {
             var fromAddress = new MailAddress("backupmonitorreport@gmail.com", "Backup Report");
             var toAddress = new MailAddress("JWarnes@samaritan.org", "Justin Warnes");
-            var password = "testPassword1";
+            const string password = "testPassword1";
 
             var smtp = new SmtpClient
                 {
@@ -182,19 +189,31 @@ namespace BackupMonitorCLI
                     Credentials = new NetworkCredential(fromAddress.Address, password)
                 };
 
-            //todo http://stackoverflow.com/questions/32260/sending-email-in-net-through-gmail
-
+            foreach (var r in reports)
+            {
+                var message = new MailMessage(fromAddress, toAddress)
+                    {
+                        Subject = r.EmailSubject,
+                        Body = r.EmailBody
+                    };
+                //smtp.Send(message);
+                Console.WriteLine("\n\n");
+                Console.WriteLine(message.Subject);
+                Console.WriteLine(message.Body);
+                Console.WriteLine("\n\n");
+            }
+            
 
         }
 
         private void SaveReports()
         {
-            
+            //todo: method saves the reoprts to disk
         }
 
         private void LoadReports()
         {
-            
+            //todo: method reads the reports from disk
         }
     }
 }
