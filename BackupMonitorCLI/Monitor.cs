@@ -7,6 +7,7 @@ using System.IO;
 using System.Threading;
 using System.Net;
 using System.Net.Mail;
+using System.Xml;
 
 namespace BackupMonitorCLI
 {
@@ -14,6 +15,9 @@ namespace BackupMonitorCLI
     {
         private List<Server> servers;
         private List<Report> reports;
+        private List<Report> unsent;
+
+        private const int MaxAttempts = 4;
 
         private string mailString;
         private string defaultMail;
@@ -26,17 +30,21 @@ namespace BackupMonitorCLI
         {
             servers = new List<Server>();
             reports = new List<Report>();
+            unsent = new List<Report>();
             LoadConfiguration();
             ScanFolders();
             CheckSpace();
             CheckQueuedReports();
             GenerateReports();
-            MailReports();
+            MailReports(); 
             End();
         }
 
         private void End()
         {
+            if(unsent.Count > 0)
+                SaveReports(unsent);
+
         }
 
         private void LoadConfiguration(string path = @"config.xml")
@@ -114,9 +122,9 @@ namespace BackupMonitorCLI
                         Console.WriteLine("no backups found");
                     }
 
-                    var temp = (DateTime.Now - s.LastUpdate).Hours;
+                    var temp = (DateTime.Now - s.LastUpdate).TotalHours;
 
-                    if (files.Any() && (DateTime.Now - files.First().LastWriteTime).Hours <= 24)
+                    if (files.Any() && (DateTime.Now - files.First().LastWriteTime).TotalHours <= 24)
                         s.UpdatedToday = true;
                 }
                 
@@ -163,57 +171,133 @@ namespace BackupMonitorCLI
 
         private void CheckQueuedReports()
         {
+            if (File.Exists("queue.txt"))
+            {
+                LoadReports();
+            }
         }
 
         private void GenerateReports()
         {
             foreach (var s in servers)
             {
-                reports.Add(new Report(s));
+                var r = new Report(s);
+                r.Subject = r.GenerateEmailSubject();
+                r.Body = r.GenerateEmailBody();
+
+                reports.Add(r);
             }
+
         }
 
         private void MailReports()
         {
-            var fromAddress = new MailAddress("backupmonitorreport@gmail.com", "Backup Report");
-            var toAddress = new MailAddress("JWarnes@samaritan.org", "Justin Warnes");
-            const string password = "testPassword1";
+            var fromAddress = new MailAddress("backupreports@localhost", "Backup Reports");
+            //var toAddress = new MailAddress("JWarnes@samaritan.org", "Justin Warnes");
+            var toAddress = new MailAddress("jwarnes@gmail.com", "Justin Warnes");
+            const string password = "testPassword1[]";
 
             var smtp = new SmtpClient
                 {
-                    Host = "smtp.gmail.com",
-                    Port = 465,
-                    EnableSsl = true,
+                    Host = "localhost",
+                    Port = 25,
+                    //EnableSsl = true,
+                    Timeout = 30000,
                     DeliveryMethod = SmtpDeliveryMethod.Network,
-                    UseDefaultCredentials = false,
-                    Credentials = new NetworkCredential(fromAddress.Address, password)
+                    UseDefaultCredentials = true,
+                    //Credentials = new NetworkCredential(fromAddress.Address, password)
                 };
 
-            foreach (var r in reports)
+            Console.WriteLine("\nMailing reports...\n");
+
+            //save reports early in case client doesn't get through a lengthy mailing list
+            SaveReports(reports);
+            int reportNum = 0;
+            foreach(var r in reports)
             {
-                var message = new MailMessage(fromAddress, toAddress)
+                reportNum++;
+                var message = new MailMessage(fromAddress, toAddress);
+                message.Subject = r.Subject;
+                message.Body = r.Body;
+               
+                //attempt to mail
+                int attempts = 1;
+                do
+                {
+                    try
                     {
-                        Subject = r.EmailSubject,
-                        Body = r.EmailBody
-                    };
-                //smtp.Send(message);
-                Console.WriteLine("\n\n");
-                Console.WriteLine(message.Subject);
-                Console.WriteLine(message.Body);
-                Console.WriteLine("\n\n");
+                        Console.WriteLine("\tSending report {0}/{1}, attempt {2}", reportNum, reports.Count, attempts);
+                        //Console.WriteLine("{0}\n{1}\n", message.Subject, message.Body);
+                        //smtp.Send(message);
+                        r.Mailed = true;
+                    }
+                    catch (SmtpException exception)
+                    {
+                        Console.WriteLine("\tSend Failed: {0}\n\t{1}", exception.Message, exception.StatusCode);
+                    }
+                    attempts++;
+                } while (attempts < MaxAttempts + 1 && !r.Mailed);
+
+                //save any unsent messages
+                if(!r.Mailed)
+                    unsent.Add(r);
             }
+            smtp.Dispose();
+            DeleteSavedReports();
+         
+        }
+
+        private void SaveReports(List<Report> reports, string path = @"queue.txt")
+        {
+            var settings = new XmlWriterSettings();
+            settings.IndentChars = "    ";
             
+            settings.Indent = true;
 
+            var w = XmlWriter.Create(path, settings);
+            w.WriteStartDocument();
+            w.WriteStartElement("Reports");
+
+            foreach (var report in reports)
+            {
+                w.WriteStartElement("Report");
+                {
+                    w.WriteAttributeString("subject", report.Subject);
+                    w.WriteAttributeString("body", report.Body.Replace("\t", "#T#").Replace("\n", "#NEW#"));
+                }
+                w.WriteEndElement();
+            }
+
+            w.WriteEndElement();
+            w.WriteEndDocument();
+            w.Close();
         }
 
-        private void SaveReports()
+        private void LoadReports(string path = @"queue.txt")
         {
-            //todo: method saves the reoprts to disk
+            var settings = new XmlReaderSettings();
+            settings.IgnoreComments = true;
+            settings.IgnoreWhitespace = true;
+
+            var r = XmlReader.Create(path, settings);
+
+            r.ReadToDescendant("Reports");
+            r.ReadToDescendant("Report");
+            do
+            {
+                var report = new Report();
+                report.Subject = r["subject"];
+                report.Body = r["body"].Replace("#T#", "\t").Replace("#NEW#", "\n");
+                reports.Add(report);
+
+            } while (r.ReadToNextSibling("Report"));
+
+            r.Close();
         }
 
-        private void LoadReports()
+        private void DeleteSavedReports(string path = @"queue.txt")
         {
-            //todo: method reads the reports from disk
+            File.Delete(path);
         }
     }
 }

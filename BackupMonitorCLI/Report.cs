@@ -8,6 +8,9 @@ namespace BackupMonitorCLI
     public class Report
     {
         public List<String> Addresses { get; set; }
+        public string Subject { get; set; }
+        public string Body { get; set; }
+        public bool Mailed { get; set; }
         private Server server;
         public Server Server
         {
@@ -19,6 +22,11 @@ namespace BackupMonitorCLI
         {
             Addresses = new List<string>();
             this.server = server;
+        }
+
+        public Report()
+        {
+
         }
 
         public void PrintToConsole()
@@ -33,43 +41,41 @@ namespace BackupMonitorCLI
                 Console.WriteLine("\tBackup: No backup files found!");
         }
 
-        public string EmailSubject
+        public string GenerateEmailSubject()
         {
-            get
+
+            if (server.UpdatedToday && !server.LowOnSpace)
+                return string.Format("{0} on {1} - Backup OK!", server.Name, DateTime.Now.ToShortDateString());
+            else
             {
-                
-                if (server.UpdatedToday && !server.LowOnSpace)
-                    return string.Format("Backup OK! '{0}' on {1}", server.Name, DateTime.Now.ToShortDateString());
-                else
-                {
-                    var subject = (server.UpdatedToday) ? "Backup OK! " : "Backup FAILED!";
-                    subject += (server.LowOnSpace) ? "LOW SPACE WARNING " : "";
-                    subject += string.Format("'{0}' on {1}", server.Name, DateTime.Now.ToShortDateString());
-                    return subject;
-                }
-                
+                var subject = string.Format("{0} on {1} - ", server.Name, DateTime.Now.ToShortDateString());
+                subject += (server.UpdatedToday) ? "Backup OK! " : "Backup FAILED! ";
+                subject += (server.LowOnSpace) ? "LOW SPACE WARNING! " : "";
+                return subject;
             }
+
+
         }
 
-        public string EmailBody
+        public string GenerateEmailBody()
         {
-            get
-            {
-                var body = string.Format("Report for server '{0}', generated {1}\n", server.Name,
-                                            DateTime.Now.ToString("g"));
-                if (!server.UpdatedToday)
-                    body += "\t**Backup FAILED!**\n";
-                if (server.LowOnSpace)
-                    body += "\t**LOW SPACE WARNING!**\n";
 
-                body += (!server.NoUpdates)
-                            ? string.Format("\tLast Backup: {0}\n", server.LastUpdate.ToString("g"))
-                            : "\tNo updates found!\n";
-                body += string.Format("\tDisk Capacity: {0}/{1} ({2}%)", Math.Round(server.FreeSpace, 1), Math.Round(server.TotalSpace,1),
-                                      Math.Round((server.FreeSpace/server.TotalSpace)*100, 1));
+            var body = string.Format("Report for server '{0}', generated {1}\n", server.Name,
+                                     DateTime.Now.ToString("g"));
+            if (!server.UpdatedToday)
+                body += "\t**Backup FAILED!**\n";
+            if (server.LowOnSpace)
+                body += "\t**Low Space Warning!**\n";
 
-                return body;
-            }
+            body += (!server.NoUpdates)
+                        ? string.Format("\tLast Backup: {0}\n", server.LastUpdate.ToString("g"))
+                        : "\tNo updates found!\n";
+            body += string.Format("\tDisk Capacity: {0}/{1}Gb ({2}%)", Math.Round(server.FreeSpace, 1),
+                                  Math.Round(server.TotalSpace, 1),
+                                  Math.Round((server.FreeSpace/server.TotalSpace)*100, 1));
+
+            return body;
+
         }
 
     }
