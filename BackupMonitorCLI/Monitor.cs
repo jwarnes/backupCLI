@@ -12,6 +12,8 @@ namespace BackupMonitorCLI
 {
     public class Monitor
     {
+
+        #region Fields
         private List<Server> servers;
         private List<Report> reports;
         private List<Report> unsent;
@@ -24,12 +26,16 @@ namespace BackupMonitorCLI
         public Monitor()
         {
         }
-
+        #endregion
+        
+        #region Program flow methods (outlined in Start)
         public void Start()
         {
             servers = new List<Server>();
             reports = new List<Report>();
             unsent = new List<Report>();
+
+            //program flow. there is undoubtedly a better way to do this
             LoadConfiguration();
             ScanFolders();
             CheckSpace();
@@ -39,22 +45,10 @@ namespace BackupMonitorCLI
             End();
         }
 
-        private void End()
-        {
-            //save unsent reports to disk
-            if(unsent.Count > 0)
-                SaveReports(unsent);
-
-            Console.WriteLine("Backup reporting complete.");
-
-        }
-
         private void LoadConfiguration(string path = @"config.xml")
         {
             Console.Write("Loading {0}...", path);
-            XmlReaderSettings settings = new XmlReaderSettings();
-            settings.IgnoreComments = true;
-            settings.IgnoreWhitespace = true;
+            var settings = new XmlReaderSettings() {IgnoreComments =  true, IgnoreWhitespace = true};
 
             XmlReader r = XmlReader.Create(path, settings);
 
@@ -173,7 +167,7 @@ namespace BackupMonitorCLI
 
         private void CheckQueuedReports()
         {
-            if (File.Exists("queue.txt"))
+            if (File.Exists("queue.xml"))
             {
                 LoadReports();
             }
@@ -201,7 +195,7 @@ namespace BackupMonitorCLI
             Console.WriteLine("\nMailing reports...\n");
 
             //configure exchange server
-            ExchangeService mailService = new ExchangeService();
+            var mailService = new ExchangeService(ExchangeVersion.Exchange2007_SP1);
             mailService.AutodiscoverUrl("jwarnes@samaritan.org");
 
             int reportNum = 0;
@@ -243,14 +237,24 @@ namespace BackupMonitorCLI
          
         }
 
-        private void SaveReports(List<Report> reports, string path = @"queue.txt")
+        private void End()
         {
-            var settings = new XmlWriterSettings();
-            settings.IndentChars = "    ";
-            
-            settings.Indent = true;
+            //save unsent reports to disk
+            if (unsent.Count > 0)
+                SaveReports(unsent);
 
-            var w = XmlWriter.Create(path, settings);
+            Console.WriteLine("\nBackup reporting complete.");
+
+        }
+
+        #endregion
+
+        #region Persistant data methods
+
+        private void SaveReports(List<Report> reports, string path = @"queue.xml")
+        {
+
+            var w = XmlWriter.Create(path, new XmlWriterSettings() { Indent = true, IndentChars = "    " });
             w.WriteStartDocument();
             w.WriteStartElement("Reports");
 
@@ -270,13 +274,10 @@ namespace BackupMonitorCLI
             w.Close();
         }
 
-        private void LoadReports(string path = @"queue.txt")
+        private void LoadReports(string path = @"queue.xml")
         {
-            var settings = new XmlReaderSettings();
-            settings.IgnoreComments = true;
-            settings.IgnoreWhitespace = true;
 
-            var r = XmlReader.Create(path, settings);
+            var r = XmlReader.Create(path, new XmlReaderSettings() { IgnoreComments = true, IgnoreWhitespace = true });
 
             r.ReadToDescendant("Reports");
             r.ReadToDescendant("Report");
@@ -284,7 +285,7 @@ namespace BackupMonitorCLI
             {
                 var report = new Report();
                 report.Subject = r["subject"];
-                report.Body = r["body"].Replace("#T#", "\t").Replace("#NEW#", "\n");
+                report.Body = r["body"];
                 report.importance = (Importance)Convert.ToInt16(r["importance"]);
                 reports.Add(report);
 
@@ -293,9 +294,10 @@ namespace BackupMonitorCLI
             r.Close();
         }
 
-        private void DeleteSavedReports(string path = @"queue.txt")
+        private void DeleteSavedReports(string path = @"queue.xml")
         {
             File.Delete(path);
         }
+        #endregion
     }
 }
