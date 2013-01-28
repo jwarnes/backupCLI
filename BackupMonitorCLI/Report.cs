@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using Microsoft.Exchange.WebServices.Data;
 
 namespace BackupMonitorCLI
 {
@@ -11,6 +12,7 @@ namespace BackupMonitorCLI
         public string Subject { get; set; }
         public string Body { get; set; }
         public bool Mailed { get; set; }
+        public Importance importance { get; set; }
         private Server server;
         public Server Server
         {
@@ -60,22 +62,27 @@ namespace BackupMonitorCLI
         public string GenerateEmailBody()
         {
 
-            var body = string.Format("Report for server '{0}', generated {1}\n", server.Name,
+            var body = string.Format("Report for server '{0}', generated {1}<br>", server.Name,
                                      DateTime.Now.ToString("g"));
             if (!server.UpdatedToday)
-                body += "\t**Backup FAILED!**\n";
+                body += "<b>**Backup FAILED!**</b><br>";
             if (server.LowOnSpace)
-                body += "\t**Low Space Warning!**\n";
+                body += "<b>**Low Space Warning!**</b><br><br>";
 
             body += (!server.NoUpdates)
-                        ? string.Format("\tLast Backup: {0}\n", server.LastUpdate.ToString("g"))
-                        : "\tNo updates found!\n";
-            body += string.Format("\tDisk Capacity: {0}/{1}Gb ({2}%)", Math.Round(server.FreeSpace, 1),
+                        ? string.Format("Last Backup: {0}<br>", server.LastUpdate.ToString("g"))
+                        : "No updates found!<br>";
+            body += string.Format("Disk Capacity: {0}/{1}Gb ({2}%)", Math.Round(server.FreeSpace, 1),
                                   Math.Round(server.TotalSpace, 1),
                                   Math.Round((server.FreeSpace/server.TotalSpace)*100, 1));
 
             return body;
 
+        }
+
+        public void GenerateImportance()
+        {
+            this.importance = (server.LowOnSpace || !server.UpdatedToday) ? Importance.High : Importance.Normal;
         }
 
     }

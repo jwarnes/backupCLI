@@ -4,10 +4,9 @@ using System.Linq;
 using System.Text;
 using System.Xml;
 using System.IO;
-using System.Threading;
-using System.Net;
-using System.Net.Mail;
-using System.Xml;
+using Microsoft.Exchange.WebServices;
+using Microsoft.Exchange.WebServices.Data;
+
 
 namespace BackupMonitorCLI
 {
@@ -42,8 +41,11 @@ namespace BackupMonitorCLI
 
         private void End()
         {
+            //save unsent reports to disk
             if(unsent.Count > 0)
                 SaveReports(unsent);
+
+            Console.WriteLine("Backup reporting complete.");
 
         }
 
@@ -184,7 +186,7 @@ namespace BackupMonitorCLI
                 var r = new Report(s);
                 r.Subject = r.GenerateEmailSubject();
                 r.Body = r.GenerateEmailBody();
-
+                r.GenerateImportance();
                 reports.Add(r);
             }
 
@@ -192,33 +194,28 @@ namespace BackupMonitorCLI
 
         private void MailReports()
         {
-            var fromAddress = new MailAddress("backupreports@localhost", "Backup Reports");
-            //var toAddress = new MailAddress("JWarnes@samaritan.org", "Justin Warnes");
-            var toAddress = new MailAddress("jwarnes@gmail.com", "Justin Warnes");
-            const string password = "testPassword1[]";
 
-            var smtp = new SmtpClient
-                {
-                    Host = "localhost",
-                    Port = 25,
-                    //EnableSsl = true,
-                    Timeout = 30000,
-                    DeliveryMethod = SmtpDeliveryMethod.Network,
-                    UseDefaultCredentials = true,
-                    //Credentials = new NetworkCredential(fromAddress.Address, password)
-                };
+            //save reports early in case the program doesn't get through a lengthy mailing list
+            SaveReports(reports);
 
             Console.WriteLine("\nMailing reports...\n");
 
-            //save reports early in case client doesn't get through a lengthy mailing list
-            SaveReports(reports);
+            //configure exchange server
+            ExchangeService mailService = new ExchangeService();
+            mailService.AutodiscoverUrl("jwarnes@samaritan.org");
+
             int reportNum = 0;
             foreach(var r in reports)
             {
                 reportNum++;
-                var message = new MailMessage(fromAddress, toAddress);
+                var message = new EmailMessage(mailService);
                 message.Subject = r.Subject;
                 message.Body = r.Body;
+                message.Body.BodyType = BodyType.HTML;
+                message.ToRecipients.Add("jwarnes@gmail.com");
+                message.Importance = r.importance;
+                
+                message.Save();
                
                 //attempt to mail
                 int attempts = 1;
@@ -228,12 +225,12 @@ namespace BackupMonitorCLI
                     {
                         Console.WriteLine("\tSending report {0}/{1}, attempt {2}", reportNum, reports.Count, attempts);
                         //Console.WriteLine("{0}\n{1}\n", message.Subject, message.Body);
-                        //smtp.Send(message);
+                        message.SendAndSaveCopy();
                         r.Mailed = true;
                     }
-                    catch (SmtpException exception)
+                    catch (Exception ex)
                     {
-                        Console.WriteLine("\tSend Failed: {0}\n\t{1}", exception.Message, exception.StatusCode);
+                        Console.WriteLine("\tSend Failed: {0}\n\t{1}", ex.GetType().ToString(), ex.Message );
                     }
                     attempts++;
                 } while (attempts < MaxAttempts + 1 && !r.Mailed);
@@ -242,7 +239,6 @@ namespace BackupMonitorCLI
                 if(!r.Mailed)
                     unsent.Add(r);
             }
-            smtp.Dispose();
             DeleteSavedReports();
          
         }
@@ -264,6 +260,7 @@ namespace BackupMonitorCLI
                 {
                     w.WriteAttributeString("subject", report.Subject);
                     w.WriteAttributeString("body", report.Body.Replace("\t", "#T#").Replace("\n", "#NEW#"));
+                    w.WriteAttributeString("importance", ((int)report.importance).ToString());
                 }
                 w.WriteEndElement();
             }
@@ -288,6 +285,7 @@ namespace BackupMonitorCLI
                 var report = new Report();
                 report.Subject = r["subject"];
                 report.Body = r["body"].Replace("#T#", "\t").Replace("#NEW#", "\n");
+                report.importance = (Importance)Convert.ToInt16(r["importance"]);
                 reports.Add(report);
 
             } while (r.ReadToNextSibling("Report"));
