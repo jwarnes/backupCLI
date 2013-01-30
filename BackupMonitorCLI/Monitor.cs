@@ -24,8 +24,7 @@ namespace BackupMonitorCLI
         private string user;
         private SecureString password;
 
-        private string mailString;
-        private string defaultMail;
+        private List<string> recipients;
 
         public Monitor()
         {
@@ -38,6 +37,7 @@ namespace BackupMonitorCLI
             servers = new List<Server>();
             reports = new List<Report>();
             unsent = new List<Report>();
+            recipients = new List<string>();
 
             //get user exchange credentials
             Console.Write("Username: ");
@@ -62,24 +62,27 @@ namespace BackupMonitorCLI
             XmlReader r = XmlReader.Create(path, settings);
 
             r.ReadToDescendant("Mail");
-            defaultMail = r["default"];
-            mailString = r.ReadString().Replace(" ", string.Empty);
+            recipients.Add(r["default"]);
+
+            recipients.AddRange(r["recipients"].Replace(" ", string.Empty).Split(','));
 
             r.ReadToFollowing("Servers");
             r.ReadToDescendant("Server");
             do
             {
-                Server server = new Server();
-                server.Name = r["name"];
-                server.Space = Convert.ToDouble(r["spaceValue"]);
-                server.spaceType = (SpaceType)Convert.ToInt16(r["spaceType"]);
+                var server = new Server
+                    {
+                        Name = r["name"],
+                        Space = Convert.ToDouble(r["spaceValue"]),
+                        spaceType = (SpaceType) Convert.ToInt16(r["spaceType"])
+                    };
 
                 //folders loop
 
                 r.ReadToDescendant("Folder");
                 do
                 {
-                    Folder folder = new Folder(r["path"], Convert.ToBoolean(Convert.ToInt16(r["recurse"])));
+                    var folder = new Folder(r["path"], Convert.ToBoolean(Convert.ToInt16(r["recurse"])));
                     server.AddFolder(folder);
                 } while (r.ReadToNextSibling("Folder"));
 
@@ -189,7 +192,6 @@ namespace BackupMonitorCLI
             {
                 var r = new Report(s);
                 r.Subject = r.GenerateEmailSubject();
-                //r.Body = r.GenerateEmailBody();
                 r.Body = r.GenerateHtmlEmail();
                 r.GenerateImportance();
                 reports.Add(r);
@@ -255,9 +257,14 @@ namespace BackupMonitorCLI
             foreach(var r in reports)
             {
                 reportNum++;
+
+                //create message
                 var message = new EmailMessage(mailService) {Subject = r.Subject, Body = r.Body};
                 message.Body.BodyType = BodyType.HTML;
-                message.ToRecipients.Add("jwarnes@samaritan.org");
+
+                foreach (var recipient in recipients)
+                    message.ToRecipients.Add(recipient);
+
                 message.Importance = r.importance;
                 
                 message.Save();
