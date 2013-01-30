@@ -8,7 +8,6 @@ namespace BackupMonitorCLI
     public class Folder
     {
         private string path;
-        private bool recurse;
 
         public string Path
         {
@@ -16,16 +15,12 @@ namespace BackupMonitorCLI
             set { Path = value; }
         }
 
-        public bool RecurseSubdirectories
-        {
-            get { return recurse; }
-            set { recurse = value; }
-        }
-        
+        public bool RecurseSubdirectories { get; set; }
+
         public Folder(string path, bool recurse)
         {
             this.path = path;
-            this.recurse = recurse;
+            RecurseSubdirectories = recurse;
         }
     }
 }

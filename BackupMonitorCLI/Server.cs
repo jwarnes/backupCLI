@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.IO;
 
 namespace BackupMonitorCLI
 {
@@ -21,9 +22,9 @@ namespace BackupMonitorCLI
         public bool UpdatedToday { get; set; }
         public bool LowOnSpace { get; set; }
         public bool NoUpdates { get; set; }
-        public double FreeSpace { get; set; }
-        public double TotalSpace { get; set; }
         public DateTime LastUpdate { get; set; }
+
+        public List<DriveInfo> Drives { get; private set; }
 
         private List<Folder> folders;
 
@@ -48,6 +49,20 @@ namespace BackupMonitorCLI
 
         #endregion
 
+        public void GenerateDriveList()
+        {
+            Drives = new List<DriveInfo>();
+
+            if(folders.Count < 1)
+                return;
+            foreach (var f in folders)
+            {
+                var drive = new DriveInfo(Path.GetPathRoot(f.Path));
+                if(Drives.Count(s => s.Name == drive.Name) < 1)
+                    Drives.Add(drive);
+            }
+        }
+
         #region Folder List Methods
         public void AddFolder(Folder folder)
         {
@@ -59,18 +74,9 @@ namespace BackupMonitorCLI
             folders.Remove(folder);
         }
 
-        public void ChangeFolder(Folder folder)
+        public void ChangeFolder(int index, Folder folder)
         {
-            int i = 0;
-            foreach (Folder f in folders)
-            {
-                if (f.Equals(folder))
-                {
-                    folders[i] = folder;
-                    break;
-                }
-                i++;
-            }
+            folders[index] = folder;
         }
         #endregion
 

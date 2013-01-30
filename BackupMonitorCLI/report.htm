@@ -1,0 +1,79 @@
+<html>
+    <head><style>
+              table.report
+              {
+                  border: 1px solid black;
+                  width: 330px;
+                  font-family: Arial, sans-serif;
+                  padding: 0px;
+              }
+
+              tr.header
+              {
+                  background-color: black;
+                  color: white;
+                  font-weight: bold;
+              }
+              td.header {
+                  background-color: black;
+              }
+
+              td.date
+              {
+                  font-weight: normal;
+                  font-size: 10px;
+                  text-align: right;
+                  padding-right: 4px;
+                  background-color: black;
+              }
+
+              td.warning
+              {
+                  font-weight: bold;
+                  color: red;
+                  text-align: center;
+                  font-family: monospace;
+              }
+
+              td.left
+              {
+                  font-weight: bold;
+                  font-size: 14px;
+              }
+              td.right {
+                  font-size: 12px;
+                  font-family: monospace;
+              }
+              
+              td.drive
+              {
+                  text-align: right;
+                  font-weight: bold;
+                  padding-right: 32px;
+                  font-family: monospace;
+              }
+              tr {
+                  padding-bottom: 4px;
+              }
+          </style></head>
+    <body>
+
+        <table class="report" cellspacing=0 cellpadding=0>
+            <tr class="header">
+                <td class="header">#serverName</td>
+                <td class="date">#reportDate</td>
+            </tr>
+            #warningFailure
+            #warningSpace
+            <tr>
+                <td class="left">Last Backup</td>
+                <td class="right">#lastBackup</td>
+            </tr>
+            <tr>
+                <td class="left" colspan=2>Drive Capacity</td>
+            </tr>
+            #drives
+	
+        </table>
+    </body>
+</html>

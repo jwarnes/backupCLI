@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
 using Microsoft.Exchange.WebServices.Data;
@@ -72,9 +73,49 @@ namespace BackupMonitorCLI
             body += (!server.NoUpdates)
                         ? string.Format("Last Backup: {0}<br>", server.LastUpdate.ToString("g"))
                         : "No updates found!<br>";
-            body += string.Format("Disk Capacity: {0}/{1}Gb ({2}%)", Math.Round(server.FreeSpace, 1),
-                                  Math.Round(server.TotalSpace, 1),
-                                  Math.Round((server.FreeSpace/server.TotalSpace)*100, 1));
+            body += "Disk Capacity: <ul>";
+            foreach (var drive in server.Drives)
+            {
+                var freeSpace = (double)drive.AvailableFreeSpace / 1073741824;
+                var totalSpace = (double)drive.TotalSize / 1073741824;
+
+                body += string.Format("<li>{0} {1}/{2}Gb ({3}%)</li>",
+                                      drive.Name,
+                                      Math.Round(freeSpace, 1),
+                                      Math.Round(totalSpace, 1),
+                                      Math.Round((freeSpace/totalSpace)*100, 1));
+            }
+            body += "</ul>";
+            return body;
+
+        }
+
+        public string GenerateHtmlEmail(string path = @"report.htm")
+        {
+            var body = File.ReadAllText(path)
+                               .Replace("#serverName", server.Name)
+                               .Replace("#reportDate", DateTime.Now.ToString("g"));
+            var lastBackup = (server.NoUpdates) ? "No backups found!" : server.LastUpdate.ToString("g");
+            body = body.Replace("#lastBackup", lastBackup);
+            
+            var warningSpace = (server.LowOnSpace) ? "<tr><td colspan=2 class=\"warning\">**Low Space Warning!**</td></tr>": String.Empty;
+            var warningFailure = (!server.UpdatedToday) ? "<tr><td colspan=2 class=\"warning\">**Backup FAILED!**</td></tr>" : String.Empty;
+
+            body = body.Replace("#warningSpace", warningSpace).Replace("#warningFailure", warningFailure);
+
+            var driveString = "";
+            foreach (var drive in server.Drives)
+            {
+                var freeSpace = (double) drive.AvailableFreeSpace/1073741824;
+                var totalSpace = (double) drive.TotalSize/1073741824;
+
+                driveString += string.Format("<tr><td class=\"drive\">{0}</td><td class=\"right\">{1}/{2}Gb ({3}%)</td></tr>",
+                                      drive.Name,
+                                      Math.Round(freeSpace, 1),
+                                      Math.Round(totalSpace, 1),
+                                      Math.Round((freeSpace/totalSpace)*100, 1));
+            }
+            body = body.Replace("#drives", driveString);
 
             return body;
 

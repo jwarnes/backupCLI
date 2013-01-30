@@ -4,8 +4,10 @@ using System.Linq;
 using System.Text;
 using System.Xml;
 using System.IO;
-using Microsoft.Exchange.WebServices;
 using Microsoft.Exchange.WebServices.Data;
+using Microsoft.Exchange.WebServices.Autodiscover;
+using System.Security;
+using System.Runtime.InteropServices;
 
 
 namespace BackupMonitorCLI
@@ -19,6 +21,8 @@ namespace BackupMonitorCLI
         private List<Report> unsent;
 
         private const int MaxAttempts = 4;
+        private string user;
+        private SecureString password;
 
         private string mailString;
         private string defaultMail;
@@ -28,14 +32,19 @@ namespace BackupMonitorCLI
         }
         #endregion
         
-        #region Program flow methods (outlined in Start)
+        #region Program Flow 
         public void Start()
         {
             servers = new List<Server>();
             reports = new List<Report>();
             unsent = new List<Report>();
 
-            //program flow. there is undoubtedly a better way to do this
+            //get user exchange credentials
+            Console.Write("Username: ");
+            user = Console.ReadLine();
+            password = PromptForPassword();
+
+            //program flow
             LoadConfiguration();
             ScanFolders();
             CheckSpace();
@@ -129,16 +138,17 @@ namespace BackupMonitorCLI
 
         private void CheckSpace()
         {
-            foreach (Server s in servers)
+            foreach (var s in servers)
             {
                 Console.WriteLine("\nChecking space for '{0}'...", s.Name);
                 s.LowOnSpace = false;
-                foreach (Folder f in s.Folders)
+                s.GenerateDriveList();
+                foreach (var drive in s.Drives)
                 {
-                    var drive = new DriveInfo(Path.GetPathRoot(f.Path));
-                    s.FreeSpace = (double)drive.AvailableFreeSpace/1073741824;
-                    s.TotalSpace = (double) drive.TotalSize/1073741824;
+                    var freeSpace = (double)drive.AvailableFreeSpace/1073741824;
+                    var totalSpace = (double) drive.TotalSize/1073741824;
 
+                    //spaceWarning represents the minimum amount of free space configured for the server before a warning is issued
                     double spaceWarning = s.Space;
 
                     //determine acceptible space remaining levels
@@ -151,12 +161,12 @@ namespace BackupMonitorCLI
                             spaceWarning /= 1024;
                             break;
                           case SpaceType.Percent:
-                            spaceWarning = (s.TotalSpace)*(s.Space/100);
+                            spaceWarning = (totalSpace)*(s.Space/100);
                             break;
                     }
 
-                    Console.WriteLine("\t {0} {1}gb available", drive.Name, Math.Round(s.FreeSpace, 1));
-                    if (s.FreeSpace < spaceWarning)
+                    Console.WriteLine("\t {0} {1}gb available", drive.Name, Math.Round(freeSpace, 1));
+                    if (freeSpace < spaceWarning)
                     {
                         Console.WriteLine("\t\tWARNING: Low space threshhold of {0}gb exceeded", Math.Round(spaceWarning, 1));
                         s.LowOnSpace = true;
@@ -179,7 +189,8 @@ namespace BackupMonitorCLI
             {
                 var r = new Report(s);
                 r.Subject = r.GenerateEmailSubject();
-                r.Body = r.GenerateEmailBody();
+                //r.Body = r.GenerateEmailBody();
+                r.Body = r.GenerateHtmlEmail();
                 r.GenerateImportance();
                 reports.Add(r);
             }
@@ -192,33 +203,72 @@ namespace BackupMonitorCLI
             //save reports early in case the program doesn't get through a lengthy mailing list
             SaveReports(reports);
 
-            Console.WriteLine("\nMailing reports...\n");
+            var mailService = new ExchangeService(ExchangeVersion.Exchange2010_SP2);
+            var insecurePass = Marshal.PtrToStringBSTR(Marshal.SecureStringToBSTR(password));
+            mailService.Credentials = new WebCredentials(user, insecurePass);
+            
 
-            //configure exchange server
-            var mailService = new ExchangeService(ExchangeVersion.Exchange2007_SP1);
-            mailService.AutodiscoverUrl("jwarnes@samaritan.org");
+            //attempt to connect to exchange server
+            Console.WriteLine("\nConnecting to exchange server...");
+            int attempts = 1;
+            bool connected;
+            do
+            {
+                try
+                {
+                    mailService.AutodiscoverUrl(user+"@samaritan.org");
+                    connected = true;
+                }
+                catch (AutodiscoverLocalException ex)
+                {
+                    connected = false;
+                    Console.WriteLine("Attempt {0}/{1}  failed. \n\t{2}\nRetrying connection...", attempts, MaxAttempts,
+                                      ex.Message);
+                }
+                catch (AutodiscoverRemoteException ex)
+                {
+                    connected = false;
+                    Console.WriteLine("Credentials invalid. \n\tEx:{0}", ex.Message);
+                    break;
 
+                }
+                catch (ServiceLocalException ex)
+                {
+                    Console.WriteLine("Credentials invalid. \n\tEx:{0}", ex.Message);
+                    connected = false;
+                    break;
+                }
+
+                attempts++;
+            } while (attempts <= MaxAttempts);
+
+            if (!connected)
+            {
+                Console.WriteLine("Couldn't connect to exchange server.");
+                return;
+            }
+
+
+
+            Console.WriteLine("Mailing reports...\n");
             int reportNum = 0;
             foreach(var r in reports)
             {
                 reportNum++;
-                var message = new EmailMessage(mailService);
-                message.Subject = r.Subject;
-                message.Body = r.Body;
+                var message = new EmailMessage(mailService) {Subject = r.Subject, Body = r.Body};
                 message.Body.BodyType = BodyType.HTML;
-                message.ToRecipients.Add("jwarnes@gmail.com");
+                message.ToRecipients.Add("jwarnes@samaritan.org");
                 message.Importance = r.importance;
                 
                 message.Save();
                
                 //attempt to mail
-                int attempts = 1;
+                attempts = 1;
                 do
                 {
                     try
                     {
                         Console.WriteLine("\tSending report {0}/{1}, attempt {2}", reportNum, reports.Count, attempts);
-                        //Console.WriteLine("{0}\n{1}\n", message.Subject, message.Body);
                         message.SendAndSaveCopy();
                         r.Mailed = true;
                     }
@@ -227,7 +277,7 @@ namespace BackupMonitorCLI
                         Console.WriteLine("\tSend Failed: {0}\n\t{1}", ex.GetType().ToString(), ex.Message );
                     }
                     attempts++;
-                } while (attempts < MaxAttempts + 1 && !r.Mailed);
+                } while (attempts <= MaxAttempts  && !r.Mailed);
 
                 //save any unsent messages
                 if(!r.Mailed)
@@ -249,7 +299,7 @@ namespace BackupMonitorCLI
 
         #endregion
 
-        #region Persistant data methods
+        #region Persistant Data
 
         private void SaveReports(List<Report> reports, string path = @"queue.xml")
         {
@@ -263,7 +313,7 @@ namespace BackupMonitorCLI
                 w.WriteStartElement("Report");
                 {
                     w.WriteAttributeString("subject", report.Subject);
-                    w.WriteAttributeString("body", report.Body.Replace("\t", "#T#").Replace("\n", "#NEW#"));
+                    w.WriteAttributeString("body", report.Body.Replace("\r", "#R#").Replace("\n", "#NEW#"));
                     w.WriteAttributeString("importance", ((int)report.importance).ToString());
                 }
                 w.WriteEndElement();
@@ -285,7 +335,7 @@ namespace BackupMonitorCLI
             {
                 var report = new Report();
                 report.Subject = r["subject"];
-                report.Body = r["body"];
+                report.Body = r["body"].Replace("#R#", "\r").Replace("#NEW#", "\n");
                 report.importance = (Importance)Convert.ToInt16(r["importance"]);
                 reports.Add(report);
 
@@ -297,6 +347,33 @@ namespace BackupMonitorCLI
         private void DeleteSavedReports(string path = @"queue.xml")
         {
             File.Delete(path);
+        }
+        #endregion
+
+        #region User Prompts
+        public SecureString PromptForPassword()
+        {
+            Console.Write("Password: ");
+            ConsoleKeyInfo key;
+            var securePass = new SecureString();
+            do
+            {
+                key = Console.ReadKey(true);
+
+                if (char.IsSymbol(key.KeyChar) || char.IsLetterOrDigit(key.KeyChar) || char.IsPunctuation(key.KeyChar) || key.Key == ConsoleKey.Spacebar)
+                {
+                    securePass.AppendChar(key.KeyChar);
+                    Console.Write("*");
+                }
+                if (key.Key == ConsoleKey.Backspace && securePass.Length > 0)
+                {
+                    Console.Write("\b \b");
+                    securePass.RemoveAt(securePass.Length-1);
+                }
+            } while (key.Key != ConsoleKey.Enter);
+            Console.WriteLine();
+
+            return securePass;
         }
         #endregion
     }
