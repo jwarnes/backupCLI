@@ -206,10 +206,8 @@ namespace BackupMonitorCLI
             SaveReports(reports);
 
             var mailService = new ExchangeService(ExchangeVersion.Exchange2010_SP2);
-            var insecurePass = Marshal.PtrToStringBSTR(Marshal.SecureStringToBSTR(password));
-            mailService.Credentials = new WebCredentials(user, insecurePass);
+            mailService.Credentials = new WebCredentials(user, Marshal.PtrToStringBSTR(Marshal.SecureStringToBSTR(password)));
             
-
             //attempt to connect to exchange server
             Console.WriteLine("\nConnecting to exchange server...");
             int attempts = 1;
@@ -218,7 +216,8 @@ namespace BackupMonitorCLI
             {
                 try
                 {
-                    mailService.AutodiscoverUrl(user+"@samaritan.org");
+                    //mailService.AutodiscoverUrl(user + "@samaritan.org", redirect => true);
+                    mailService.Url = new Uri("https://spex11.samaritan.org/EWS/Exchange.asmx");
                     connected = true;
                 }
                 catch (AutodiscoverLocalException ex)
@@ -242,7 +241,7 @@ namespace BackupMonitorCLI
                 }
 
                 attempts++;
-            } while (attempts <= MaxAttempts);
+            } while (!connected && attempts <= MaxAttempts);
 
             if (!connected)
             {
@@ -251,10 +250,9 @@ namespace BackupMonitorCLI
             }
 
 
-
             Console.WriteLine("Mailing reports...\n");
             int reportNum = 0;
-            foreach(var r in reports)
+            foreach (var r in reports)
             {
                 reportNum++;
 
@@ -266,9 +264,18 @@ namespace BackupMonitorCLI
                     message.ToRecipients.Add(recipient);
 
                 message.Importance = r.importance;
-                
-                message.Save();
-               
+
+                //see if the server accepts the credentials
+                try
+                {
+                    message.Save();
+                }
+                catch (ServiceRequestException)
+                {
+                    Console.WriteLine("Server did not accept credentials.");
+                    break;
+                }
+
                 //attempt to mail
                 attempts = 1;
                 do
@@ -285,10 +292,6 @@ namespace BackupMonitorCLI
                     }
                     attempts++;
                 } while (attempts <= MaxAttempts  && !r.Mailed);
-
-                //save any unsent messages
-                if(!r.Mailed)
-                    unsent.Add(r);
             }
             DeleteSavedReports();
          
@@ -297,8 +300,16 @@ namespace BackupMonitorCLI
         private void End()
         {
             //save unsent reports to disk
+            foreach (var report in reports)
+            {
+                if(!report.Mailed)
+                    unsent.Add(report);
+            }
             if (unsent.Count > 0)
+            {
                 SaveReports(unsent);
+                Console.WriteLine("Unsaved reports saved to disk.");
+            }
 
             Console.WriteLine("\nBackup reporting complete.");
 
