@@ -8,6 +8,7 @@ using Microsoft.Exchange.WebServices.Data;
 using Microsoft.Exchange.WebServices.Autodiscover;
 using System.Security;
 using System.Runtime.InteropServices;
+using System.Threading;
 
 
 namespace BackupMonitorCLI
@@ -20,7 +21,9 @@ namespace BackupMonitorCLI
         private List<Report> reports;
         private List<Report> unsent;
 
-        private const int MaxAttempts = 4;
+        private const int MaxEmailAttempts = 4;
+        private const int MaxEWSConnectAttempts = 60;
+        private const int ReconnectWaitInterval = 600;
         private string user;
         private SecureString password;
 
@@ -30,8 +33,7 @@ namespace BackupMonitorCLI
         {
         }
         #endregion
-        
-        #region Program Flow 
+
         public void Start()
         {
             servers = new List<Server>();
@@ -39,19 +41,223 @@ namespace BackupMonitorCLI
             unsent = new List<Report>();
             recipients = new List<string>();
 
-            //get user exchange credentials
+            //get user's Exchange credentials
             Console.Write("Username: ");
             user = Console.ReadLine();
             password = PromptForPassword();
 
             //program flow
             LoadConfiguration();
-            ScanFolders();
-            CheckSpace();
+
+            CheckBackupFiles();
+            CheckDiskSpace();
+
             CheckQueuedReports();
             GenerateReports();
-            MailReports(); 
+            SaveReports(reports);
+
+            var mailService = ConnectToEws();
+            MailReports(mailService); 
+
             End();
+        }
+
+        #region Disk Operations
+
+        private void CheckBackupFiles()
+        {
+            foreach (Server s in servers)
+            {
+                s.UpdatedToday = false;
+                s.NoUpdates = true;
+
+                Console.WriteLine("\nScanning folders for '{0}'...", s.Name);
+                foreach (Folder f in s.Folders)
+                {
+                    Console.Write("\t{0}: ", f.Path);
+                    
+                    //get a list of files from the directory
+                    SearchOption recurse = (f.RecurseSubdirectories)
+                                               ? SearchOption.AllDirectories
+                                               : SearchOption.TopDirectoryOnly;
+
+                    var directory = new DirectoryInfo(f.Path);
+
+                    //returns a List<FileInfo> of *.tib files sorted by creation date
+                    var files = directory.GetFiles("*.tib", recurse).OrderByDescending(w => w.LastWriteTime);
+
+
+                    //if we find a file, check how old it is
+                    if (files.Any())
+                    {
+                        if (files.First().LastWriteTime > s.LastUpdate)
+                            s.LastUpdate = files.First().LastWriteTime;
+                        Console.WriteLine("updated {0} days ago", (DateTime.Now - files.First().LastWriteTime).Days);
+                        s.NoUpdates = false;
+                    }
+                    else
+                    {
+                        Console.WriteLine("no backups found");
+                    }
+
+                    if (files.Any() && (DateTime.Now - files.First().LastWriteTime).TotalHours <= 24)
+                        s.UpdatedToday = true;
+                }
+                
+            }
+        }
+
+        private void CheckDiskSpace()
+        {
+            foreach (var s in servers)
+            {
+                Console.WriteLine("\nChecking space for '{0}'...", s.Name);
+                s.LowOnSpace = false;
+                s.GenerateDriveList();
+                foreach (var drive in s.Drives)
+                {
+                    var freeSpace = (double)drive.AvailableFreeSpace/1073741824;
+                    var totalSpace = (double) drive.TotalSize/1073741824;
+
+                    //spaceWarning represents the minimum amount of free space configured for this server before a warning is issued
+                    double spaceWarning = s.Space;
+
+                    //determine acceptible space remaining levels
+                    switch (s.spaceType)
+                    {
+                          case SpaceType.TB:
+                            spaceWarning *= 1024;
+                            break;
+                          case SpaceType.MB:
+                            spaceWarning /= 1024;
+                            break;
+                          case SpaceType.Percent:
+                            spaceWarning = (totalSpace)*(s.Space/100);
+                            break;
+                    }
+
+                    Console.WriteLine("\t {0} {1}gb available", drive.Name, Math.Round(freeSpace, 1));
+                    if (freeSpace < spaceWarning)
+                    {
+                        Console.WriteLine("\t\tWARNING: Low space threshhold of {0}gb exceeded", Math.Round(spaceWarning, 1));
+                        s.LowOnSpace = true;
+                    }
+                }
+            }
+        }
+
+        #endregion
+
+        #region EWS and Mailing
+
+        private ExchangeService ConnectToEws()
+        {
+            //instatiate service and create credentials
+            var mailService = new ExchangeService(ExchangeVersion.Exchange2010_SP2);
+            mailService.Credentials = new WebCredentials(user, Marshal.PtrToStringBSTR(Marshal.SecureStringToBSTR(password)), "SAMARITAN");
+
+            //attempt to locate SP exchange server through autodiscover
+            bool connected = false;
+            int attempts = 1;
+            do
+            {
+                try
+                {
+                    Console.WriteLine("Locating SP exchange server...");
+                    mailService.AutodiscoverUrl(user + "@samaritan.org", redirect => true);
+                    connected = true;
+                }
+                catch (Exception)
+                {
+                    //attempt to connect to hardcoded URL if the autodiscover fails
+                    try
+                    {
+                        Console.WriteLine("Autodiscover failed. Connecting to last known URL...");
+                        mailService.Url = new Uri("https://spex11.samaritan.org/EWS/Exchange.asmx");
+                        mailService.GetInboxRules();
+                        connected = true;
+                    }
+                    catch (Exception)
+                    {
+                        Console.WriteLine("Connection failed. Attempting to reconnect in {0} minutes.\n", ReconnectWaitInterval/60000);
+                        connected = false;
+                    }
+                }
+
+                //wait and retry the connection in a few minutes
+                if (!connected) Thread.Sleep(ReconnectWaitInterval);
+                attempts++;
+            } while (!connected && attempts < MaxEWSConnectAttempts);
+
+            return mailService;
+
+        }
+
+        private void MailReports(ExchangeService mailService)
+        {
+            Console.WriteLine("Mailing reports...\n");
+            int reportNum = 0;
+            foreach (var r in reports)
+            {
+                reportNum++;
+
+                //create message
+                var message = new EmailMessage(mailService) {Subject = r.Subject, Body = r.Body};
+                message.Body.BodyType = BodyType.HTML;
+
+                foreach (var recipient in recipients)
+                    message.ToRecipients.Add(recipient);
+
+                message.Importance = r.importance;
+                message.Save();
+
+                //attempt to mail
+                int attempts = 1;
+                do
+                {
+                    try
+                    {
+                        Console.WriteLine("\tSending report {0}/{1}, attempt {2}", reportNum, reports.Count, attempts);
+                        message.SendAndSaveCopy();
+                        r.Mailed = true;
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine("{0}", ex.Message );
+                        Thread.Sleep(3000);
+                    }
+                    attempts++;
+                } while (attempts <= MaxEmailAttempts  && !r.Mailed);
+            }
+
+            //clear out cache, we will resave it later if there are any reports in the queue that did not get mailed
+            DeleteSavedReports();
+
+        }
+
+        #endregion
+
+        #region Persistant Data and Reports
+
+        private void CheckQueuedReports()
+        {
+            if (File.Exists("queue.xml"))
+            {
+                LoadReports();
+            }
+        }
+
+        private void GenerateReports()
+        {
+            foreach (var s in servers)
+            {
+                var r = new Report(s);
+                r.Subject = r.GenerateEmailSubject();
+                r.Body = r.GenerateHtmlEmail();
+                r.GenerateImportance();
+                reports.Add(r);
+            }
+
         }
 
         private void LoadConfiguration(string path = @"config.xml")
@@ -64,7 +270,11 @@ namespace BackupMonitorCLI
             r.ReadToDescendant("Mail");
             recipients.Add(r["default"]);
 
-            recipients.AddRange(r["recipients"].Replace(" ", string.Empty).Split(','));
+            foreach (var recipient in r["recipients"].Replace(" ", string.Empty).Split(','))
+            {
+                if(recipient != "")
+                    recipients.Add(recipient);
+            }
 
             r.ReadToFollowing("Servers");
             r.ReadToDescendant("Server");
@@ -95,229 +305,6 @@ namespace BackupMonitorCLI
             Console.WriteLine(" {0} servers found\n", servers.Count);
 
         }
-
-        private void ScanFolders()
-        {
-            foreach (Server s in servers)
-            {
-                s.UpdatedToday = false;
-                s.NoUpdates = true;
-
-                Console.WriteLine("\nScanning folders for '{0}'...", s.Name);
-                foreach (Folder f in s.Folders)
-                {
-                    Console.Write("\t{0}: ", f.Path);
-                    
-                    //get a list of files from the directory
-                    SearchOption recurse = (f.RecurseSubdirectories)
-                                               ? SearchOption.AllDirectories
-                                               : SearchOption.TopDirectoryOnly;
-
-                    var directory = new DirectoryInfo(f.Path);
-
-                    //returns a List<FileInfo> of *.tib files sorted by creation date
-                    var files = directory.GetFiles("*.tib", recurse).OrderByDescending(w => w.LastWriteTime);
-
-                    if (files.Any())
-                    {
-                        if (files.First().LastWriteTime > s.LastUpdate)
-                            s.LastUpdate = files.First().LastWriteTime;
-                        Console.WriteLine("updated {0} days ago", (DateTime.Now - files.First().LastWriteTime).Days);
-                        s.NoUpdates = false;
-                    }
-                    else
-                    {
-                        Console.WriteLine("no backups found");
-                    }
-
-                    var temp = (DateTime.Now - s.LastUpdate).TotalHours;
-
-                    if (files.Any() && (DateTime.Now - files.First().LastWriteTime).TotalHours <= 24)
-                        s.UpdatedToday = true;
-                }
-                
-            }
-        }
-
-        private void CheckSpace()
-        {
-            foreach (var s in servers)
-            {
-                Console.WriteLine("\nChecking space for '{0}'...", s.Name);
-                s.LowOnSpace = false;
-                s.GenerateDriveList();
-                foreach (var drive in s.Drives)
-                {
-                    var freeSpace = (double)drive.AvailableFreeSpace/1073741824;
-                    var totalSpace = (double) drive.TotalSize/1073741824;
-
-                    //spaceWarning represents the minimum amount of free space configured for the server before a warning is issued
-                    double spaceWarning = s.Space;
-
-                    //determine acceptible space remaining levels
-                    switch (s.spaceType)
-                    {
-                          case SpaceType.TB:
-                            spaceWarning *= 1024;
-                            break;
-                          case SpaceType.MB:
-                            spaceWarning /= 1024;
-                            break;
-                          case SpaceType.Percent:
-                            spaceWarning = (totalSpace)*(s.Space/100);
-                            break;
-                    }
-
-                    Console.WriteLine("\t {0} {1}gb available", drive.Name, Math.Round(freeSpace, 1));
-                    if (freeSpace < spaceWarning)
-                    {
-                        Console.WriteLine("\t\tWARNING: Low space threshhold of {0}gb exceeded", Math.Round(spaceWarning, 1));
-                        s.LowOnSpace = true;
-                    }
-                }
-            }
-        }
-
-        private void CheckQueuedReports()
-        {
-            if (File.Exists("queue.xml"))
-            {
-                LoadReports();
-            }
-        }
-
-        private void GenerateReports()
-        {
-            foreach (var s in servers)
-            {
-                var r = new Report(s);
-                r.Subject = r.GenerateEmailSubject();
-                r.Body = r.GenerateHtmlEmail();
-                r.GenerateImportance();
-                reports.Add(r);
-            }
-
-        }
-
-        private void MailReports()
-        {
-
-            //save reports early in case the program doesn't get through a lengthy mailing list
-            SaveReports(reports);
-
-            var mailService = new ExchangeService(ExchangeVersion.Exchange2010_SP2);
-            mailService.Credentials = new WebCredentials(user, Marshal.PtrToStringBSTR(Marshal.SecureStringToBSTR(password)));
-            
-            //attempt to connect to exchange server
-            Console.WriteLine("\nConnecting to exchange server...");
-            int attempts = 1;
-            bool connected;
-            do
-            {
-                try
-                {
-                    //mailService.AutodiscoverUrl(user + "@samaritan.org", redirect => true);
-                    mailService.Url = new Uri("https://spex11.samaritan.org/EWS/Exchange.asmx");
-                    connected = true;
-                }
-                catch (AutodiscoverLocalException ex)
-                {
-                    connected = false;
-                    Console.WriteLine("Attempt {0}/{1}  failed. \n\t{2}\nRetrying connection...", attempts, MaxAttempts,
-                                      ex.Message);
-                }
-                catch (AutodiscoverRemoteException ex)
-                {
-                    connected = false;
-                    Console.WriteLine("Credentials invalid. \n\tEx:{0}", ex.Message);
-                    break;
-
-                }
-                catch (ServiceLocalException ex)
-                {
-                    Console.WriteLine("Credentials invalid. \n\tEx:{0}", ex.Message);
-                    connected = false;
-                    break;
-                }
-
-                attempts++;
-            } while (!connected && attempts <= MaxAttempts);
-
-            if (!connected)
-            {
-                Console.WriteLine("Couldn't connect to exchange server.");
-                return;
-            }
-
-
-            Console.WriteLine("Mailing reports...\n");
-            int reportNum = 0;
-            foreach (var r in reports)
-            {
-                reportNum++;
-
-                //create message
-                var message = new EmailMessage(mailService) {Subject = r.Subject, Body = r.Body};
-                message.Body.BodyType = BodyType.HTML;
-
-                foreach (var recipient in recipients)
-                    message.ToRecipients.Add(recipient);
-
-                message.Importance = r.importance;
-
-                //see if the server accepts the credentials
-                try
-                {
-                    message.Save();
-                }
-                catch (ServiceRequestException)
-                {
-                    Console.WriteLine("Server did not accept credentials.");
-                    break;
-                }
-
-                //attempt to mail
-                attempts = 1;
-                do
-                {
-                    try
-                    {
-                        Console.WriteLine("\tSending report {0}/{1}, attempt {2}", reportNum, reports.Count, attempts);
-                        message.SendAndSaveCopy();
-                        r.Mailed = true;
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine("\tSend Failed: {0}\n\t{1}", ex.GetType().ToString(), ex.Message );
-                    }
-                    attempts++;
-                } while (attempts <= MaxAttempts  && !r.Mailed);
-            }
-            DeleteSavedReports();
-         
-        }
-
-        private void End()
-        {
-            //save unsent reports to disk
-            foreach (var report in reports)
-            {
-                if(!report.Mailed)
-                    unsent.Add(report);
-            }
-            if (unsent.Count > 0)
-            {
-                SaveReports(unsent);
-                Console.WriteLine("Unsaved reports saved to disk.");
-            }
-
-            Console.WriteLine("\nBackup reporting complete.");
-
-        }
-
-        #endregion
-
-        #region Persistant Data
 
         private void SaveReports(List<Report> reports, string path = @"queue.xml")
         {
@@ -366,6 +353,7 @@ namespace BackupMonitorCLI
         {
             File.Delete(path);
         }
+
         #endregion
 
         #region User Prompts
@@ -394,5 +382,24 @@ namespace BackupMonitorCLI
             return securePass;
         }
         #endregion
+
+        private void End()
+        {
+            //save unsent reports to disk
+            foreach (var report in reports)
+            {
+                if(!report.Mailed)
+                    unsent.Add(report);
+            }
+            if (unsent.Count > 0)
+            {
+                SaveReports(unsent);
+                Console.WriteLine("Unsaved reports saved to disk.");
+            }
+
+            Console.WriteLine("\nBackup reporting complete.");
+
+        }
+
     }
 }

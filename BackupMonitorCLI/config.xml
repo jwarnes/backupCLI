@@ -1,13 +1,11 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Config>
-   <Mail default="serverbackupreports@samaritan.org">
-jwarnes@gmail.com,joe123@domain.net
+   <Mail default="jwarnes@samaritan.org" recipients="">
 </Mail>
    <Servers>
       <Server name="Server 1" spaceValue="2" spaceType="0">
          <Folder path="C:\Backups" recurse="0" />
          <Folder path="C:\BackupsSub" recurse="1" />
-         <Folder path="H:\" recurse="1" />
       </Server>
    </Servers>
 </Config>
