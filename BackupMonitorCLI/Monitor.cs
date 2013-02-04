@@ -34,20 +34,39 @@ namespace BackupMonitorCLI
         }
         #endregion
 
-        public void Start()
+        public void Start(Dictionary<string, string> cla)
         {
             servers = new List<Server>();
             reports = new List<Report>();
             unsent = new List<Report>();
             recipients = new List<string>();
 
+            var configPath = @"config.xml";
+            if (cla.ContainsKey("config")) configPath = cla["config"];
+           
+
             //get user's Exchange credentials
-            Console.Write("Username: ");
-            user = Console.ReadLine();
-            password = PromptForPassword();
+            if (cla.ContainsKey("user"))
+                user = cla["user"];
+            else
+            {
+                Console.Write("Username: ");
+                user = Console.ReadLine();
+            }
+
+            if (cla.ContainsKey("password"))
+            {
+                password = new SecureString();
+                foreach (var c in cla["password"])
+                {
+                    password.AppendChar(c);
+                }
+            }
+            else password = PromptForPassword();
+ 
 
             //program flow
-            LoadConfiguration();
+            LoadConfiguration(configPath);
 
             CheckBackupFiles();
             CheckDiskSpace();

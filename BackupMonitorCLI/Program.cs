@@ -12,10 +12,7 @@ namespace BackupMonitorCLI
         {
             Console.Title = "Backup Monitor";
 
-            if (File.Exists(@"config.xml"))
-                new Monitor().Start();
-            else
-                Console.WriteLine("No configuration file found!");
+            new Monitor().Start(ClaParser.GetArgs(args));
 
 
             Console.ReadKey();
