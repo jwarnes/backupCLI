@@ -13,9 +13,6 @@ namespace BackupMonitorCLI
             Console.Title = "Backup Monitor";
 
             new Monitor().Start(ClaParser.GetArgs(args));
-
-
-            Console.ReadKey();
         }
 
 

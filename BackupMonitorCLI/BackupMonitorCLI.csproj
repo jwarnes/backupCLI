@@ -57,10 +57,6 @@
     <Compile Include="Server.cs" />
   </ItemGroup>
   <ItemGroup>
-    <Content Include="config.xml">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <SubType>Designer</SubType>
-    </Content>
     <Content Include="report.htm">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
