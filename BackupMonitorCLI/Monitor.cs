@@ -43,7 +43,19 @@ namespace BackupMonitorCLI
 
             var configPath = @"config.xml";
             if (cla.ContainsKey("config")) configPath = cla["config"];
-           
+
+            if (!File.Exists(configPath))
+            {
+                Console.WriteLine("No configuration file found! Run SPFMConfig.exe first.");
+                return;
+            }
+            //load configuration data and exit if there are no servers in the file
+            LoadConfiguration(configPath);
+            if (servers.Count < 1)
+            {
+                Console.WriteLine("No servers configured.");
+                return;
+            }
 
             //get user's Exchange credentials
             if (cla.ContainsKey("user"))
@@ -66,8 +78,6 @@ namespace BackupMonitorCLI
  
 
             //program flow
-            LoadConfiguration(configPath);
-
             CheckBackupFiles();
             CheckDiskSpace();
 
@@ -316,7 +326,8 @@ namespace BackupMonitorCLI
                 } while (r.ReadToNextSibling("Folder"));
 
 
-                servers.Add(server);
+                if(server.Name != null && server.Folders.Count > 0) 
+                    servers.Add(server);
             } while (r.ReadToNextSibling("Server"));
 
             r.Close();
