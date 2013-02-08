@@ -49,18 +49,22 @@ namespace BackupMonitorCLI
 
         #endregion
 
-        public void GenerateDriveList()
+        public bool GenerateDriveList()
         {
             Drives = new List<DriveInfo>();
 
             if(folders.Count < 1)
-                return;
+                return false;
             foreach (var f in folders)
             {
+                if (!Directory.Exists(f.Path))
+                    continue;
                 var drive = new DriveInfo(Path.GetPathRoot(f.Path));
                 if(Drives.Count(s => s.Name == drive.Name) < 1)
                     Drives.Add(drive);
             }
+            return (Drives.Count > 0);
+
         }
 
         #region Folder List Methods

@@ -113,6 +113,12 @@ namespace BackupMonitorCLI
                     var directory = new DirectoryInfo(f.Path);
 
                     //returns a List<FileInfo> of *.tib files sorted by creation date
+                    if (!directory.Exists)
+                    {
+                        Console.WriteLine("Directory not found.");
+                        continue;
+                    }
+
                     var files = directory.GetFiles("*.tib", recurse).OrderByDescending(w => w.LastWriteTime);
 
 
@@ -142,7 +148,8 @@ namespace BackupMonitorCLI
             {
                 Console.WriteLine("\nChecking space for '{0}'...", s.Name);
                 s.LowOnSpace = false;
-                s.GenerateDriveList();
+                if(!s.GenerateDriveList())
+                    Console.WriteLine("No drives found!");
                 foreach (var drive in s.Drives)
                 {
                     var freeSpace = (double)drive.AvailableFreeSpace/1073741824;

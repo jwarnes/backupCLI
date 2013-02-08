@@ -115,6 +115,8 @@ namespace BackupMonitorCLI
                                       Math.Round(totalSpace, 1),
                                       Math.Round((freeSpace/totalSpace)*100, 1));
             }
+            if (server.Drives.Count < 1)
+                driveString = "<tr><td class=\"warning\">Drives not found!</td><td class=\"right\">&nbsp;</td></tr>";
             body = body.Replace("#drives", driveString);
 
             return body;
