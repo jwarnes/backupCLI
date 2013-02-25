@@ -9,6 +9,7 @@ using Microsoft.Exchange.WebServices.Autodiscover;
 using System.Security;
 using System.Runtime.InteropServices;
 using System.Threading;
+using System.Net.Mail;
 
 
 namespace BackupMonitorCLI
@@ -85,8 +86,8 @@ namespace BackupMonitorCLI
             GenerateReports();
             SaveReports(reports);
 
-            var mailService = ConnectToEws();
-            MailReports(mailService); 
+            //var mailService = ConnectToEws();
+            MailReportsSMTP(); 
 
             End();
         }
@@ -229,7 +230,7 @@ namespace BackupMonitorCLI
 
         }
 
-        private void MailReports(ExchangeService mailService)
+        private void MailReportsExchange(ExchangeService mailService)
         {
             Console.WriteLine("Mailing reports...\n");
             int reportNum = 0;
@@ -264,6 +265,53 @@ namespace BackupMonitorCLI
                     }
                     attempts++;
                 } while (attempts <= MaxEmailAttempts  && !r.Mailed);
+            }
+
+            //clear out cache, we will resave it later if there are any reports in the queue that did not get mailed
+            DeleteSavedReports();
+
+        }
+
+
+        private void MailReportsSMTP()
+        {
+            var client = new SmtpClient("smtp.1and1.com");
+
+            Console.WriteLine("Mailing reports...\n");
+            int reportNum = 0;
+            foreach (var r in reports)
+            {
+                reportNum++;
+
+                //create message
+                var defaultAddress = new MailAddress("fieldalerts@spnetinfo.org");
+                var message = new MailMessage(defaultAddress, new MailAddress("jwarnes@gmail.com"))
+                    {
+                        IsBodyHtml = true,
+                        Body = r.Body
+                    };
+
+                foreach (var recipient in recipients)
+                    message.CC.Add(new MailAddress(recipient));
+
+
+                //attempt to mail
+                int attempts = 1;
+                do
+                {
+                    try
+                    {
+                        Console.WriteLine("\tSending report {0}/{1}, attempt {2}", reportNum, reports.Count, attempts);
+                        client.Send(message);
+                        r.Mailed = true;
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine("{0}", ex.Message);
+                        Thread.Sleep(3000);
+                    }
+                    attempts++;
+                } while (attempts <= MaxEmailAttempts && !r.Mailed);
             }
 
             //clear out cache, we will resave it later if there are any reports in the queue that did not get mailed
