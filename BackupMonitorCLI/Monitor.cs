@@ -10,6 +10,7 @@ using System.Security;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Net.Mail;
+using System.Management;
 
 
 namespace BackupMonitorCLI
@@ -22,6 +23,7 @@ namespace BackupMonitorCLI
         private List<Report> reports;
         private List<Report> unsent;
 
+        private const bool DevMode = true;
         private const int MaxEmailAttempts = 4;
         private const int MaxEWSConnectAttempts = 60;
         private const int ReconnectWaitInterval = 600;
@@ -58,7 +60,16 @@ namespace BackupMonitorCLI
                 return;
             }
 
-            //get user's Exchange credentials
+            //dev mode
+            if (DevMode)
+            {
+                cla.Add("user", "fieldalerts@spnetinfo.org");
+                cla.Add("password",
+                     System.Text.Encoding.UTF8.GetString(Convert.FromBase64String("IXRoaXNpc2F0ZXN0aXRpc29ubHlhdGVzdCE=")));
+                DeleteSavedReports();
+            }
+
+            //get user's credentials
             if (cla.ContainsKey("user"))
                 user = cla["user"];
             else
@@ -84,6 +95,7 @@ namespace BackupMonitorCLI
 
             CheckQueuedReports();
             GenerateReports();
+            if (DevMode) Console.ReadLine();
             SaveReports(reports);
 
             //var mailService = ConnectToEws();
@@ -112,16 +124,19 @@ namespace BackupMonitorCLI
                                                : SearchOption.TopDirectoryOnly;
 
                     var directory = new DirectoryInfo(f.Path);
-
-                    //returns a List<FileInfo> of *.tib files sorted by creation date
+                    
+                    //returns a List<FileInfo> of files sorted by creation date
                     if (!directory.Exists)
                     {
                         Console.WriteLine("Directory not found.");
                         continue;
                     }
 
-                    var files = directory.GetFiles("*.tib", recurse).OrderByDescending(w => w.LastWriteTime);
-
+                    //var files = directory.GetFiles("*.tib", recurse).OrderByDescending(w => w.LastWriteTime);
+                    
+                    var files = new string[] { "*.tib", "*.bak", "*.btf" }
+                                .SelectMany(i => directory.GetFiles(i, recurse))
+                                .Distinct().ToArray().OrderByDescending(w => w.LastWriteTime); 
 
                     //if we find a file, check how old it is
                     if (files.Any())
@@ -185,7 +200,7 @@ namespace BackupMonitorCLI
 
         #endregion
 
-        #region EWS and Mailing
+        #region Mailing
 
         private ExchangeService ConnectToEws()
         {
@@ -272,10 +287,13 @@ namespace BackupMonitorCLI
 
         }
 
-
         private void MailReportsSMTP()
         {
             var client = new SmtpClient("smtp.1and1.com");
+
+            var credentials = new System.Net.NetworkCredential(user,  Marshal.PtrToStringBSTR(Marshal.SecureStringToBSTR(password)));
+
+            client.Credentials = credentials;
 
             Console.WriteLine("Mailing reports...\n");
             int reportNum = 0;
@@ -284,11 +302,14 @@ namespace BackupMonitorCLI
                 reportNum++;
 
                 //create message
-                var defaultAddress = new MailAddress("fieldalerts@spnetinfo.org");
-                var message = new MailMessage(defaultAddress, new MailAddress("jwarnes@gmail.com"))
+                var defaultAddress = new MailAddress(user);
+                var message = new MailMessage()
                     {
-                        IsBodyHtml = true,
-                        Body = r.Body
+                        From = defaultAddress,
+                        Subject = r.Subject,
+                        Body = r.Body,
+                        Priority = (MailPriority)r.importance,
+                        IsBodyHtml = true
                     };
 
                 foreach (var recipient in recipients)

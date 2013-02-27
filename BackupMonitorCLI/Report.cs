@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using Microsoft.Exchange.WebServices.Data;
+using Microsoft.CSharp;
 
 namespace BackupMonitorCLI
 {
@@ -109,11 +110,12 @@ namespace BackupMonitorCLI
                 var freeSpace = (double) drive.AvailableFreeSpace/1073741824;
                 var totalSpace = (double) drive.TotalSize/1073741824;
 
-                driveString += string.Format("<tr><td class=\"drive\">{0}</td><td class=\"right\">{1}/{2}Gb ({3}%)</td></tr>",
+                driveString += string.Format("<tr><td class=\"{4}\">{0}</td><td class=\"right\">{1}/{2}Gb ({3}%)</td></tr>",
                                       drive.Name,
                                       Math.Round(freeSpace, 1),
                                       Math.Round(totalSpace, 1),
-                                      Math.Round((freeSpace/totalSpace)*100, 1));
+                                      Math.Round((freeSpace/totalSpace)*100, 1),
+                                      drive.Type);
             }
             if (server.Drives.Count < 1)
                 driveString = "<tr><td class=\"warning\">Drives not found!</td><td class=\"right\">&nbsp;</td></tr>";

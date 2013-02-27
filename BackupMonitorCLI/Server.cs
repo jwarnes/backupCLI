@@ -24,7 +24,7 @@ namespace BackupMonitorCLI
         public bool NoUpdates { get; set; }
         public DateTime LastUpdate { get; set; }
 
-        public List<DriveInfo> Drives { get; private set; }
+        public List<CDriveInfo> Drives { get; private set; }
 
         private List<Folder> folders;
 
@@ -51,7 +51,7 @@ namespace BackupMonitorCLI
 
         public bool GenerateDriveList()
         {
-            Drives = new List<DriveInfo>();
+            Drives = new List<CDriveInfo>();
 
             if(folders.Count < 1)
                 return false;
@@ -59,7 +59,9 @@ namespace BackupMonitorCLI
             {
                 if (!Directory.Exists(f.Path))
                     continue;
-                var drive = new DriveInfo(Path.GetPathRoot(f.Path));
+                
+                var drive = new CDriveInfo(f.Path);
+                
                 if(Drives.Count(s => s.Name == drive.Name) < 1)
                     Drives.Add(drive);
             }
