@@ -18,7 +18,10 @@ namespace BackupMonitorCLI
             {
                 if (a.StartsWith("-"))
                 {
-                    dictionary.Add(a.TrimStart('-'), args[i+1]);
+                    if (args.Length - 1 >= i + 1)
+                        dictionary.Add(a.TrimStart('-'), args[i + 1]);
+                    else
+                        dictionary.Add(a.TrimStart('-'), "null");
                 }
                 i++;
             }

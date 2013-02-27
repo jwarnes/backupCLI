@@ -11,6 +11,7 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using System.Net.Mail;
 using System.Management;
+using Microsoft.Win32.TaskScheduler;
 
 
 namespace BackupMonitorCLI
@@ -39,10 +40,12 @@ namespace BackupMonitorCLI
 
         public void Start(Dictionary<string, string> cla)
         {
+
             servers = new List<Server>();
             reports = new List<Report>();
             unsent = new List<Report>();
             recipients = new List<string>();
+            using (File.Create("exec.dat")) { }
 
             var configPath = @"config.xml";
             if (cla.ContainsKey("config")) configPath = cla["config"];
@@ -66,7 +69,6 @@ namespace BackupMonitorCLI
                 cla.Add("user", "fieldalerts@spnetinfo.org");
                 cla.Add("password",
                      System.Text.Encoding.UTF8.GetString(Convert.FromBase64String("IXRoaXNpc2F0ZXN0aXRpc29ubHlhdGVzdCE=")));
-                DeleteSavedReports();
             }
 
             //get user's credentials
@@ -87,9 +89,16 @@ namespace BackupMonitorCLI
                 }
             }
             else password = PromptForPassword();
- 
+            
+            //hourly check
+            if (cla.ContainsKey("check"))
+            {
+                Check();
+                if (DevMode) Console.ReadLine();
+                return;
+            }
 
-            //program flow
+            //normal program flow
             CheckBackupFiles();
             CheckDiskSpace();
 
@@ -102,6 +111,33 @@ namespace BackupMonitorCLI
             MailReportsSMTP(); 
 
             End();
+        }
+
+        public void Check()
+        {
+            Console.WriteLine("Checking...");
+
+            if(File.Exists("queue.xml") || File.Exists("exec.dat"))
+            {
+                if(File.Exists("queue.xml"))
+                {
+                    //reports already exist, don't generate a new one for this hourly check
+                    Console.WriteLine("Existing reports found.");
+                    LoadReports();
+                    MailReportsSMTP();
+                } 
+                else
+                {
+                    //report file doesn't exist, maybe there was an error before it could be generated. run all processes
+                    CheckBackupFiles();
+                    CheckDiskSpace();
+                    GenerateReports();
+                    SaveReports(reports);
+                    MailReportsSMTP(); 
+                }
+
+            }
+            File.Delete("exec.dat");
         }
 
         #region Disk Operations
@@ -502,7 +538,7 @@ namespace BackupMonitorCLI
                 SaveReports(unsent);
                 Console.WriteLine("Unsaved reports saved to disk.");
             }
-
+            File.Delete("exec.dat");
             Console.WriteLine("\nBackup reporting complete.");
 
         }
