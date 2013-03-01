@@ -27,9 +27,10 @@ namespace BackupMonitorCLI
         private const bool DevMode = true;
         private const int MaxEmailAttempts = 4;
         private const int MaxEWSConnectAttempts = 60;
-        private const int ReconnectWaitInterval = 600;
+        private const int ReconnectWaitInterval = 900;
         private string user;
         private SecureString password;
+        private string[] fileTypes;
 
         private List<string> recipients;
 
@@ -45,7 +46,7 @@ namespace BackupMonitorCLI
             reports = new List<Report>();
             unsent = new List<Report>();
             recipients = new List<string>();
-            using (File.Create("exec.dat")) { }
+            
 
             var configPath = @"config.xml";
             if (cla.ContainsKey("config")) configPath = cla["config"];
@@ -66,9 +67,13 @@ namespace BackupMonitorCLI
             //dev mode
             if (DevMode)
             {
-                cla.Add("user", "fieldalerts@spnetinfo.org");
-                cla.Add("password",
-                     System.Text.Encoding.UTF8.GetString(Convert.FromBase64String("IXRoaXNpc2F0ZXN0aXRpc29ubHlhdGVzdCE=")));
+                if(!cla.ContainsKey("user"))
+                    cla.Add("user", "fieldalerts@spnetinfo.org");
+                if(!cla.ContainsKey("password"))
+                {
+                    cla.Add("password",
+                         System.Text.Encoding.UTF8.GetString(Convert.FromBase64String("IXRoaXNpc2F0ZXN0aXRpc29ubHlhdGVzdCE=")));
+                }
             }
 
             //get user's credentials
@@ -94,8 +99,11 @@ namespace BackupMonitorCLI
             if (cla.ContainsKey("check"))
             {
                 Check();
-                if (DevMode) Console.ReadLine();
                 return;
+            }
+            else
+            {
+                using (File.Create("exec.dat")) { }
             }
 
             //normal program flow
@@ -104,7 +112,6 @@ namespace BackupMonitorCLI
 
             CheckQueuedReports();
             GenerateReports();
-            if (DevMode) Console.ReadLine();
             SaveReports(reports);
 
             //var mailService = ConnectToEws();
@@ -117,27 +124,36 @@ namespace BackupMonitorCLI
         {
             Console.WriteLine("Checking...");
 
-            if(File.Exists("queue.xml") || File.Exists("exec.dat"))
+            if (File.Exists("queue.xml") || File.Exists("exec.dat"))
             {
-                if(File.Exists("queue.xml"))
+                Console.WriteLine("Task run failure detected.");
+                if (File.Exists("queue.xml"))
                 {
                     //reports already exist, don't generate a new one for this hourly check
                     Console.WriteLine("Existing reports found.");
                     LoadReports();
                     MailReportsSMTP();
-                } 
+                }
                 else
                 {
                     //report file doesn't exist, maybe there was an error before it could be generated. run all processes
+                    Console.WriteLine("No existing reports found, generating new report...");
                     CheckBackupFiles();
                     CheckDiskSpace();
                     GenerateReports();
                     SaveReports(reports);
-                    MailReportsSMTP(); 
+                    MailReportsSMTP();
+                    File.Delete("exec.dat");
                 }
 
             }
-            File.Delete("exec.dat");
+            else
+            {
+
+                Console.WriteLine("Previous task completed succesfully.");
+            }
+
+           
         }
 
         #region Disk Operations
@@ -170,7 +186,7 @@ namespace BackupMonitorCLI
 
                     //var files = directory.GetFiles("*.tib", recurse).OrderByDescending(w => w.LastWriteTime);
                     
-                    var files = new string[] { "*.tib", "*.bak", "*.btf" }
+                    var files = fileTypes
                                 .SelectMany(i => directory.GetFiles(i, recurse))
                                 .Distinct().ToArray().OrderByDescending(w => w.LastWriteTime); 
 
@@ -417,6 +433,9 @@ namespace BackupMonitorCLI
                     recipients.Add(recipient);
             }
 
+            r.ReadToFollowing("FileTypes");
+            fileTypes = (r["patterns"] != "") ? ParseTypes(r["patterns"]) : ParseTypes("*.tib, *.bak");
+
             r.ReadToFollowing("Servers");
             r.ReadToDescendant("Server");
             do
@@ -524,6 +543,11 @@ namespace BackupMonitorCLI
             return securePass;
         }
         #endregion
+
+        private string[] ParseTypes(string types)
+        {
+            return types.Replace(" ", string.Empty).Split(',');
+        }
 
         private void End()
         {
